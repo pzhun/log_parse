@@ -4,6 +4,8 @@ class ParseLog {
   constructor(options) {
     this.serviceName = options.serviceName;
     this.isParseDevice = options.isParseDevice || false;
+    this.isParseApiStatus = options.isParseApiStatus || false;
+    this.isParseErrorInfo = options.isParseErrorInfo || false;
     // 原始日子目录
     this.originalLogsDir = "..";
     // 处理后的日志目录
@@ -23,19 +25,32 @@ class ParseLog {
     if (!fs.existsSync(`${this.processedLogsDir}/devices`)) {
       fs.mkdirSync(`${this.processedLogsDir}/devices`);
     }
+
+    // 创建api-status目录
+    if (!fs.existsSync(`${this.processedLogsDir}/api-status`)) {
+      fs.mkdirSync(`${this.processedLogsDir}/api-status`);
+    }
+    // 创建error-info目录
+    if (!fs.existsSync(`${this.processedLogsDir}/error-info`)) {
+      fs.mkdirSync(`${this.processedLogsDir}/error-info`);
+    }
   }
 
   async start(date) {
     // 获取log目录下的日志文件
-
     const logs = fs
       .readdirSync(this.originalLogsDir)
       .filter((log) => log.includes(this.serviceName) && log.includes(date));
-
-    
-
     if (this.isParseDevice) {
       this.parseDevice(logs, date);
+    }
+
+    if (this.isParseApiStatus) {
+      this.parseApiStatus(logs, date);
+    }
+
+    if (this.isParseErrorInfo) {
+      this.parseErrorInfo(logs, date);
     }
   }
 
@@ -128,6 +143,115 @@ class ParseLog {
         JSON.stringify(fileContent, null, 2)
       );
     }
+  }
+
+  // 统计api的访问的code数量，统计每个code的访问次数
+  parseApiStatus(logs, date) {
+    const savePath = `${this.processedLogsDir}/api-status`;
+    const apiStatusMap = {};
+    const logFileName = `api-status-${date}.json`;
+    const outputData = [];
+
+    logs.forEach((log) => {
+      const content = fs.readFileSync(
+        `${this.originalLogsDir}/${log}`,
+        "utf-8"
+      );
+      // 或者是后一天的
+      const nextDay = new Date(`${date} 00:00:00`);
+      nextDay.setDate(nextDay.getDate() + 1);
+      // 筛选日期为开头的或者后一天的
+      const filterContent = content
+        .split("\n")
+        .filter(
+          (line) =>
+            line.startsWith(date) || line.startsWith(nextDay.toISOString())
+        )
+        .map((line) => line.replace(/\[user-agent:.*$/, ""));
+      outputData.push(...filterContent);
+    });
+    // 提取出log中的接口名与code GET /wallet/arbitrum/balance 200
+    outputData.forEach((line) => {
+      const params = line.split(" ");
+
+      if (params.length > 2 && params[2] == "info:") {
+        if (params.length > 10) {
+          const apiData = params[4].split("?");
+          const apiName = params[3] + "_" + apiData[0];
+          const code = params[5];
+          if (code !== "-") {
+            if (apiStatusMap[apiName]) {
+              apiStatusMap[apiName][code] =
+                (apiStatusMap[apiName][code] || 0) + 1;
+              apiStatusMap[apiName].count += 1;
+            } else {
+              apiStatusMap[apiName] = {
+                count: 1,
+              };
+              apiStatusMap[apiName][code] = 1;
+            }
+          }
+        }
+      }
+    });
+    const apiStatusList = [];
+    for (const apiName in apiStatusMap) {
+      if (apiStatusMap[apiName].count === 1) continue;
+      const apiStatus = apiStatusMap[apiName];
+      const apiStatusItem = {
+        apiName: apiName,
+        apiStatus: apiStatus,
+        count: apiStatusMap[apiName].count,
+      };
+      apiStatusList.push(apiStatusItem);
+    }
+
+    apiStatusList.sort((a, b) => b.count - a.count);
+
+    // 保存数据
+    fs.writeFileSync(
+      `${savePath}/${logFileName}`,
+      JSON.stringify(apiStatusList, null, 2)
+    );
+  }
+
+  // 统计报错信息
+  parseErrorInfo(logs, date) {
+    const savePath = `${this.processedLogsDir}/error-info`;
+    const errorInfoMap = {};
+
+    const logFileName = `error-info-${date}.json`;
+    const outputData = [];
+
+    logs.forEach((log) => {
+      const content = fs.readFileSync(
+        `${this.originalLogsDir}/${log}`,
+        "utf-8"
+      );
+      const nextDay = new Date(`${date} 00:00:00`);
+      nextDay.setDate(nextDay.getDate() - 1);
+      let month = nextDay.getMonth() + 1;
+      if (month < 10) {
+        month = `0${month}`;
+      }
+      let day = nextDay.getDate();
+      if (day < 10) {
+        day = `0${day}`;
+      }
+      const nextDayString = `${nextDay.getFullYear()}-${month}-${day}`;
+      const filterContent = content
+        .split("\n")
+        .filter(
+          (line) => !line.startsWith(date) && !line.startsWith(nextDayString)
+        );
+      outputData.push(...filterContent);
+    });
+
+    // 保存outputData
+    fs.writeFileSync(
+      `${savePath}/${logFileName}`,
+      JSON.stringify(outputData, null, 2)
+    );
   }
 }
 
