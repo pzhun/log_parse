@@ -2,7 +2,7 @@ import ParseLog from "./src/parseLog.js";
 
 const options = {
   serviceName: "fx-wallet-service",
-  // isParseDevice: true,
+  isParseDevice: true,
   isParseApiStatus: true,
   isParseErrorInfo: true,
 };
